@@ -55,5 +55,6 @@ Project slash commands live in `.claude/commands/`:
 - `/review-code <path>` review the owner's code for bugs, design and learning points
 - `/spec-check` check the code and specs still agree
 - `/adr <title>` draft an ADR after a decision has been discussed
+- `/commit` commit current changes with a proper message (never stages `docs/`, `.env` or generated data)
 
 Dev commands (fill in as they come to exist): none yet.
