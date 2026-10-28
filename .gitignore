@@ -10,3 +10,4 @@ __pycache__/
 .DS_Store
 data/sample_logs/*
 !data/sample_logs/.gitkeep
+docs/
