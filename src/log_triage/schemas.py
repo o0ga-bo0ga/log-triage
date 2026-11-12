@@ -1,11 +1,28 @@
 """Data contracts that cross stage and agent boundaries."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Level = Literal["INFO", "WARN", "ERROR"]
+
+# What the classifier may answer. Closed list for v1: the generator's fault types plus "unknown".
+Category = Literal[
+    "db_slowdown",
+    "connection_pool_exhaustion",
+    "cache_outage",
+    "memory_leak",
+    "bad_deploy",
+    "queue_backlog",
+    "cert_expiry",
+    "disk_full",
+    "unknown",
+]
+Severity = Literal["low", "medium", "high", "critical"]
+# identified: evidence supports a root cause. tentative: weak evidence, the report says it is only guessing.
+# insufficient_evidence: nothing credible, the report says so.
+Status = Literal["identified", "tentative", "insufficient_evidence"]
 
 # Why a line could not become a LogEvent:
 #   empty          blank line
@@ -77,6 +94,99 @@ class Digest(BaseModel):
     parsed: int
     unparsed_by_reason: dict[str, int]
     services: list[ServiceDigest]  # earliest onset first, services without an onset last
+
+
+# Everything below is written by an LLM, except TriageReport. extra="forbid" because Groq's strict structured-output
+# mode needs `additionalProperties: false` on every object. These checks cover what one object can verify about itself;
+# checks that need the log (do the cited lines exist?) live elsewhere.
+
+
+class RootCauseCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    service: str
+    confidence: float = Field(ge=0, le=1)
+    evidence_lines: list[int] = Field(min_length=1)  # line numbers a person can open to check the claim
+
+
+class ClassifiedIncident(BaseModel):
+    """The classifier's answer: what the issue is, not how it happened or how to fix it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Status
+    severity: Severity  # always a best estimate: it comes from user impact, which is visible even if the cause is not
+    category: Category
+    root_cause_candidates: list[RootCauseCandidate] = Field(max_length=3)
+    confidence: float = Field(ge=0, le=1)  # overall
+    limitations: str  # what is missing, or what would make this certain
+    summary: str
+
+    @model_validator(mode="after")
+    def _status_matches_candidates(self) -> Self:
+        if self.status == "insufficient_evidence" and self.root_cause_candidates:
+            raise ValueError("insufficient_evidence must have no root_cause_candidates")
+        if self.status != "insufficient_evidence" and not self.root_cause_candidates:
+            raise ValueError(f"{self.status} needs at least one root_cause_candidate")
+        return self
+
+
+class ChainLink(BaseModel):
+    """One step of how the incident unfolded, tied to a log line."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    line_number: int
+    service: str
+    description: str
+
+
+class NextStep(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["investigate", "remediate"]
+    action: str
+    rationale: str
+    addresses: int | None  # 1-based position in how_it_happened that this step deals with; None if it addresses none
+    check_first: str  # what to look at before acting
+
+
+class FixPlan(BaseModel):
+    """The fix suggestor's answer: how it happened, then what to do, each step tied back to the chain."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    how_it_happened: list[ChainLink]  # ordered; may be empty when the cause is unknown
+    next_steps: list[NextStep] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _steps_point_at_the_chain(self) -> Self:
+        for step in self.next_steps:
+            if step.addresses is not None and not 1 <= step.addresses <= len(self.how_it_happened):
+                raise ValueError(
+                    f"next step '{step.action}' addresses link {step.addresses}, "
+                    f"but how_it_happened has {len(self.how_it_happened)} links"
+                )
+            if step.kind == "remediate" and step.addresses is None:
+                raise ValueError(f"remediate step '{step.action}' must address a link in how_it_happened")
+        return self
+
+
+class TriageReport(BaseModel):
+    """The final report. Built by plain Python from the two agent outputs, so caveats and model_id are not model-writable."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    incident: ClassifiedIncident
+    plan: FixPlan
+    caveats: list[str]  # e.g. how many lines could not be parsed
+    model_id: str
+
+    @model_validator(mode="after")
+    def _guess_gets_no_remedy(self) -> Self:
+        if self.incident.status != "identified" and any(s.kind == "remediate" for s in self.plan.next_steps):
+            raise ValueError(f"{self.incident.status} incidents may only have investigate steps")
+        return self
 
 
 class ParseSummary(BaseModel):
