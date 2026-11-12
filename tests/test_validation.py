@@ -24,8 +24,8 @@ def incident(*candidates: RootCauseCandidate) -> ClassifiedIncident:
     )
 
 
-def candidate(service: str, *lines: int) -> RootCauseCandidate:
-    return RootCauseCandidate(service=service, confidence=0.8, evidence_lines=list(lines))
+def candidate(service: str, *lines: int, symptoms: tuple[int, ...] = ()) -> RootCauseCandidate:
+    return RootCauseCandidate(service=service, confidence=0.8, evidence_lines=list(lines), symptom_lines=list(symptoms))
 
 
 def plan(*links: tuple[int, str]) -> FixPlan:
@@ -54,6 +54,15 @@ def test_a_line_from_another_service_is_wrong_service() -> None:
     [problem] = check_incident(incident(candidate("main-db", 2)), EVENTS)
     assert problem.kind == "wrong_service"
     assert "'api'" in problem.message and "'main-db'" in problem.message
+
+
+def test_a_symptom_line_from_another_service_is_fine() -> None:
+    assert check_incident(incident(candidate("main-db", 1, symptoms=(2,))), EVENTS) == []
+
+
+def test_a_symptom_line_must_still_exist() -> None:
+    [problem] = check_incident(incident(candidate("main-db", 1, symptoms=(3,))), EVENTS)  # line 3 was rejected
+    assert problem.kind == "unknown_line"
 
 
 def test_a_service_that_is_not_in_the_log_is_unknown() -> None:

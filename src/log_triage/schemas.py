@@ -106,7 +106,14 @@ class RootCauseCandidate(BaseModel):
 
     service: str
     confidence: float = Field(ge=0, le=1)
-    evidence_lines: list[int] = Field(min_length=1)  # line numbers a person can open to check the claim
+    evidence_lines: list[int]  # the service's own log lines that point at it; must belong to this service
+    symptom_lines: list[int]  # lines from OTHER services showing the effect, e.g. a caller's "connection reset by X"
+
+    @model_validator(mode="after")
+    def _cites_something(self) -> Self:
+        if not self.evidence_lines and not self.symptom_lines:
+            raise ValueError(f"candidate '{self.service}' cites no lines at all")
+        return self
 
 
 class ClassifiedIncident(BaseModel):
@@ -128,6 +135,13 @@ class ClassifiedIncident(BaseModel):
             raise ValueError("insufficient_evidence must have no root_cause_candidates")
         if self.status != "insufficient_evidence" and not self.root_cause_candidates:
             raise ValueError(f"{self.status} needs at least one root_cause_candidate")
+        return self
+
+    @model_validator(mode="after")
+    def _candidates_are_distinct(self) -> Self:
+        services = [c.service for c in self.root_cause_candidates]
+        if len(set(services)) != len(services):
+            raise ValueError(f"root_cause_candidates must be different services, got {services}")
         return self
 
 

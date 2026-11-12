@@ -39,9 +39,10 @@ def build_evidence(incident: ClassifiedIncident, digest: Digest, events: list[Lo
         out += ["", "Root cause candidates, best first. Lines the classifier cited:"]
         for rank, candidate in enumerate(incident.root_cause_candidates, start=1):
             out.append(f"  {rank}. {candidate.service} (confidence {candidate.confidence:.2f})")
-            for number in candidate.evidence_lines:
-                if number in by_line:
-                    out.append(f"     line {number}: {by_line[number].raw}")
+            for label, numbers in (("its own line", candidate.evidence_lines), ("symptom line", candidate.symptom_lines)):
+                for number in numbers:
+                    if number in by_line:
+                        out.append(f"     {label} {number}: {by_line[number].raw}")
         for service in candidates:
             out += ["", *render_service(service)]
     else:

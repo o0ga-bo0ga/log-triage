@@ -58,8 +58,10 @@ def check_incident(incident: ClassifiedIncident, events: list[LogEvent]) -> list
     for i, candidate in enumerate(incident.root_cause_candidates):
         location = f"root_cause_candidates[{i}]"
         problems += facts.check(location, candidate.service)
-        for line_number in candidate.evidence_lines:
+        for line_number in candidate.evidence_lines:  # the service's own lines: must exist and belong to it
             problems += [p for p in facts.check(location, candidate.service, line_number) if p.kind != "unknown_service"]
+        for line_number in candidate.symptom_lines:  # lines from other services: only need to exist
+            problems += [p for p in facts.check(location, candidate.service, line_number) if p.kind == "unknown_line"]
     return problems
 
 

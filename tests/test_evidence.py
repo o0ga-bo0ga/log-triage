@@ -27,7 +27,7 @@ def incident(*candidates: RootCauseCandidate) -> ClassifiedIncident:
 
 def candidate_in(events: list[LogEvent], service: str) -> RootCauseCandidate:
     lines = [e.line_number for e in events if e.service == service and e.level != "INFO"][:2]
-    return RootCauseCandidate(service=service, confidence=0.8, evidence_lines=lines)
+    return RootCauseCandidate(service=service, confidence=0.8, evidence_lines=lines, symptom_lines=[])
 
 
 @pytest.mark.parametrize("difficulty", ["easy", "ambiguous", "hard"])
@@ -48,6 +48,14 @@ def test_the_cited_lines_are_quoted_from_the_log() -> None:
         assert f"line {number}: {by_line[number].raw}" in pack
 
 
+def test_symptom_lines_are_quoted_and_labelled() -> None:
+    result, digest, root = scenario()
+    symptom = next(e for e in result.events if e.service != root and e.level == "ERROR")
+    c = RootCauseCandidate(service=root, confidence=0.8, evidence_lines=[], symptom_lines=[symptom.line_number])
+    pack = build_evidence(incident(c), digest, result.events)
+    assert f"symptom line {symptom.line_number}: {symptom.raw}" in pack
+
+
 def test_extras_have_an_onset_are_capped_and_are_not_candidates() -> None:
     result, digest, root = scenario(difficulty="easy")
     candidates, extras = select_services(incident(candidate_in(result.events, root)), digest)
@@ -66,7 +74,7 @@ def test_no_candidate_still_gets_the_services_with_bursts() -> None:
 
 def test_an_unknown_candidate_service_is_ignored_not_a_crash() -> None:
     result, digest, _ = scenario()
-    ghost = RootCauseCandidate(service="payments", confidence=0.5, evidence_lines=[1])
+    ghost = RootCauseCandidate(service="payments", confidence=0.5, evidence_lines=[1], symptom_lines=[])
     candidates, _ = select_services(incident(ghost), digest)
     assert candidates == []
     build_evidence(incident(ghost), digest, result.events)

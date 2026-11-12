@@ -16,7 +16,7 @@ from log_triage.schemas import (
 
 
 def candidate(service: str = "main-db", confidence: float = 0.8) -> RootCauseCandidate:
-    return RootCauseCandidate(service=service, confidence=confidence, evidence_lines=[10, 12])
+    return RootCauseCandidate(service=service, confidence=confidence, evidence_lines=[10, 12], symptom_lines=[])
 
 
 def incident(status: str = "identified", candidates: list[RootCauseCandidate] | None = None) -> ClassifiedIncident:
@@ -80,9 +80,19 @@ def test_confidence_is_between_zero_and_one(bad: float) -> None:
         candidate(confidence=bad)
 
 
-def test_a_candidate_must_cite_evidence() -> None:
-    with pytest.raises(ValidationError):
-        RootCauseCandidate(service="main-db", confidence=0.5, evidence_lines=[])
+def test_a_candidate_must_cite_at_least_one_line() -> None:
+    with pytest.raises(ValidationError, match="cites no lines"):
+        RootCauseCandidate(service="main-db", confidence=0.5, evidence_lines=[], symptom_lines=[])
+
+
+def test_a_silent_service_may_be_backed_by_symptom_lines_alone() -> None:
+    c = RootCauseCandidate(service="redis-cache", confidence=0.5, evidence_lines=[], symptom_lines=[40])
+    assert c.symptom_lines == [40]
+
+
+def test_candidates_must_be_different_services() -> None:
+    with pytest.raises(ValidationError, match="different services"):
+        incident(candidates=[candidate("main-db", 0.9), candidate("main-db", 0.5)])
 
 
 def test_unknown_category_or_extra_field_is_rejected() -> None:
