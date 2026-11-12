@@ -110,14 +110,30 @@ def build_digest(result: ParseResult) -> Digest:
     )
 
 
+def _clock(ts: datetime) -> str:
+    return ts.strftime("%H:%M:%S")
+
+
+def render_service(s: ServiceDigest) -> list[str]:
+    """One service's section of the digest as text lines (no leading blank line)."""
+    onset = _clock(s.onset) if s.onset else "none"
+    counts = "  ".join(f"{level} {s.counts.get(level, 0)}" for level in LEVEL_ORDER)
+    lines = [f"{s.service}  onset {onset}  {counts}"]
+    for p in s.patterns:
+        new = " NEW" if p.novel else ""
+        lines.append(f"  {p.level} x{p.count} {_clock(p.first_seen)}-{_clock(p.last_seen)}{new}: {p.template}")
+        lines.append(f"    e.g. line {p.example.line_number}: {p.example.raw}")
+    if s.hidden_patterns:
+        lines.append(f"  (+{s.hidden_patterns} more patterns not shown)")
+    return lines
+
+
 def render(digest: Digest) -> str:
     """The digest as plain text, the form an LLM (or a person reviewing it) reads."""
     if digest.window_start is None or digest.window_end is None:
         return f"No parsable log lines ({digest.total_lines} lines total)."
 
-    def clock(ts: datetime) -> str:
-        return ts.strftime("%H:%M:%S")
-
+    clock = _clock
     unparsed = sum(digest.unparsed_by_reason.values())
     reasons = ", ".join(f"{reason} {n}" for reason, n in sorted(digest.unparsed_by_reason.items()))
     lines = [
@@ -129,15 +145,7 @@ def render(digest: Digest) -> str:
         "NEW = pattern first seen after the quiet start of the window.",
     ]
     for s in digest.services:
-        onset = clock(s.onset) if s.onset else "none"
-        counts = "  ".join(f"{level} {s.counts.get(level, 0)}" for level in LEVEL_ORDER)
-        lines += ["", f"{s.service}  onset {onset}  {counts}"]
-        for p in s.patterns:
-            new = " NEW" if p.novel else ""
-            lines.append(f"  {p.level} x{p.count} {clock(p.first_seen)}-{clock(p.last_seen)}{new}: {p.template}")
-            lines.append(f"    e.g. line {p.example.line_number}: {p.example.raw}")
-        if s.hidden_patterns:
-            lines.append(f"  (+{s.hidden_patterns} more patterns not shown)")
+        lines += ["", *render_service(s)]
     return "\n".join(lines)
 
 
