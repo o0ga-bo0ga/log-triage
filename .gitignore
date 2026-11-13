@@ -11,3 +11,8 @@ __pycache__/
 data/sample_logs/*
 !data/sample_logs/.gitkeep
 docs/
+
+# CrewAI skills installed locally for the assistant, not part of the project
+.agents/
+.claude/skills/
+skills-lock.json
