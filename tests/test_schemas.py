@@ -1,3 +1,4 @@
+import json
 from typing import Any, get_args
 
 import pytest
@@ -37,8 +38,8 @@ def link(n: int = 1) -> ChainLink:
     return ChainLink(line_number=n, service="main-db", description=f"event {n}")
 
 
-def step(kind: str = "investigate", addresses: int | None = None) -> NextStep:
-    return NextStep(kind=kind, action="look", rationale="why", addresses=addresses, check_first="logs")
+def step(kind: str = "investigate", addresses: list[int] | None = None) -> NextStep:
+    return NextStep(kind=kind, action="look", rationale="why", addresses=addresses or [], check_first="logs")
 
 
 def plan(chain_length: int = 2, *steps: NextStep) -> FixPlan:
@@ -112,18 +113,22 @@ def test_categories_match_the_generator_fault_types() -> None:
 
 def test_remediate_step_must_address_a_link() -> None:
     with pytest.raises(ValidationError, match="must address"):
-        plan(2, step("remediate", addresses=None))
-    assert plan(2, step("remediate", addresses=2)).next_steps[0].addresses == 2
+        plan(2, step("remediate", addresses=[]))
+    assert plan(2, step("remediate", addresses=[2])).next_steps[0].addresses == [2]
+
+
+def test_a_step_may_address_several_links() -> None:
+    assert plan(3, step("remediate", addresses=[2, 3])).next_steps[0].addresses == [2, 3]
 
 
 def test_investigate_step_may_address_nothing() -> None:
-    assert plan(0, step("investigate", addresses=None)).how_it_happened == []
+    assert plan(0, step("investigate", addresses=[])).how_it_happened == []
 
 
 @pytest.mark.parametrize("addresses", [0, 3, -1])
 def test_addresses_must_be_a_real_link(addresses: int) -> None:
     with pytest.raises(ValidationError, match="addresses link"):
-        plan(2, step("investigate", addresses=addresses))
+        plan(2, step("investigate", addresses=[1, addresses]))
 
 
 def test_a_plan_needs_at_least_one_step() -> None:
@@ -135,13 +140,13 @@ def test_a_plan_needs_at_least_one_step() -> None:
 
 
 def test_identified_incident_may_have_a_remedy() -> None:
-    assert report("identified", step("remediate", addresses=1)).incident.status == "identified"
+    assert report("identified", step("remediate", addresses=[1])).incident.status == "identified"
 
 
 @pytest.mark.parametrize("status", ["tentative", "insufficient_evidence"])
 def test_a_guess_gets_no_remedy(status: str) -> None:
     with pytest.raises(ValidationError, match="only have investigate"):
-        report(status, step("remediate", addresses=1))
+        report(status, step("remediate", addresses=[1]))
     assert report(status, step("investigate")).incident.status == status
 
 
@@ -162,3 +167,10 @@ def test_agent_schemas_forbid_extra_properties_everywhere(model: type) -> None:
     objects = _objects(model.model_json_schema())
     assert len(objects) > 1  # the nested models are included
     assert all(o.get("additionalProperties") is False for o in objects)
+
+
+@pytest.mark.parametrize("model", [ClassifiedIncident, FixPlan])
+def test_agent_schemas_have_no_nullable_fields(model: type) -> None:
+    # crewai strips null from the strict schema it sends the provider, so a nullable field could never be null
+    # (found when Groq rejected a FixPlan with `addresses: int | None`). Use an empty list instead.
+    assert '"null"' not in json.dumps(model.model_json_schema())

@@ -161,7 +161,9 @@ class NextStep(BaseModel):
     kind: Literal["investigate", "remediate"]
     action: str
     rationale: str
-    addresses: int | None  # 1-based position in how_it_happened that this step deals with; None if it addresses none
+    # 1-based positions in how_it_happened that this step deals with; empty if none. A list, not `int | None`:
+    # crewai strips null from the strict schema it sends the provider, so a nullable field could never be null.
+    addresses: list[int]
     check_first: str  # what to look at before acting
 
 
@@ -176,12 +178,13 @@ class FixPlan(BaseModel):
     @model_validator(mode="after")
     def _steps_point_at_the_chain(self) -> Self:
         for step in self.next_steps:
-            if step.addresses is not None and not 1 <= step.addresses <= len(self.how_it_happened):
-                raise ValueError(
-                    f"next step '{step.action}' addresses link {step.addresses}, "
-                    f"but how_it_happened has {len(self.how_it_happened)} links"
-                )
-            if step.kind == "remediate" and step.addresses is None:
+            for link in step.addresses:
+                if not 1 <= link <= len(self.how_it_happened):
+                    raise ValueError(
+                        f"next step '{step.action}' addresses link {link}, "
+                        f"but how_it_happened has {len(self.how_it_happened)} links"
+                    )
+            if step.kind == "remediate" and not step.addresses:
                 raise ValueError(f"remediate step '{step.action}' must address a link in how_it_happened")
         return self
 

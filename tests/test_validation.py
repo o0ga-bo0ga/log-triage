@@ -30,7 +30,7 @@ def candidate(service: str, *lines: int, symptoms: tuple[int, ...] = ()) -> Root
 
 def plan(*links: tuple[int, str]) -> FixPlan:
     chain = [ChainLink(line_number=n, service=s, description="d") for n, s in links]
-    step = NextStep(kind="investigate", action="a", rationale="r", addresses=None, check_first="c")
+    step = NextStep(kind="investigate", action="a", rationale="r", addresses=[], check_first="c")
     return FixPlan(how_it_happened=chain, next_steps=[step])
 
 
