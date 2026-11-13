@@ -38,10 +38,7 @@ If a file is not covered here and you are unsure, leave it out and ask.
 - Subject line 72 characters or fewer, saying **what** the commit does.
 - Add a body only when the **why** is not obvious from the diff: a blank line, then short wrapped lines.
   Mention verified facts or tradeoffs worth remembering (for example "Groq rejects schemas without additionalProperties: false").
-- End the message with this line, after a blank line:
-
-      Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
-
+- No `Co-Authored-By` or other attribution trailers. The owner's choice.
 - Pass the message with a heredoc so the formatting survives.
 
 ## Rules
