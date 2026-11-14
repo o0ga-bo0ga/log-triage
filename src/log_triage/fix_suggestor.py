@@ -5,20 +5,15 @@ classifier, its answer is checked by a guardrail and retried with the exact prob
 for a guess, because the same rules TriageReport enforces are applied here.
 """
 
-import sys
-from pathlib import Path
 from typing import Any
 
 from crewai import Agent, Crew, Task, TaskOutput
-from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 
 from log_triage.attempts import kickoff_with_retries
-from log_triage.classifier import classify
 from log_triage.digest import build_digest
 from log_triage.evidence import build_evidence
 from log_triage.llm import build_llm, model_id
-from log_triage.parser import parse_log
 from log_triage.schemas import ClassifiedIncident, FixPlan, LogEvent, ParseResult, TriageReport
 from log_triage.validation import check_plan
 
@@ -121,12 +116,3 @@ def suggest(incident: ClassifiedIncident, result: ParseResult) -> SuggestResult:
         return failed.model_copy(update={"error": "no structured output"})
     tokens = run.output.token_usage.total_tokens
     return SuggestResult(plan=plan, error=None, model_id=model_id(), total_tokens=tokens, attempts=run.attempts)
-
-if __name__ == "__main__":
-    # Try both agents on one log: python -m log_triage.fix_suggestor data/sample_logs/<scenario>.log
-    load_dotenv()
-    parsed = parse_log(Path(sys.argv[1]).read_text())
-    classified = classify(parsed)
-    print(classified.model_dump_json(indent=2))
-    if classified.incident is not None:
-        print(suggest(classified.incident, parsed).model_dump_json(indent=2))

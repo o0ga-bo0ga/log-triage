@@ -200,13 +200,14 @@ class TriageReport(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     incident: ClassifiedIncident
-    plan: FixPlan
+    plan: FixPlan | None  # None when the fix suggestor failed: the diagnosis is still worth reporting
     caveats: list[str]  # e.g. how many lines could not be parsed
     model_id: str
 
     @model_validator(mode="after")
     def _guess_gets_no_remedy(self) -> Self:
-        if self.incident.status != "identified" and any(s.kind == "remediate" for s in self.plan.next_steps):
+        steps = self.plan.next_steps if self.plan else []
+        if self.incident.status != "identified" and any(s.kind == "remediate" for s in steps):
             raise ValueError(f"{self.incident.status} incidents may only have investigate steps")
         return self
 
