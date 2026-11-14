@@ -13,7 +13,8 @@ from log_triage.schemas import ClassifiedIncident, FixPlan, LogEvent
 
 # unknown_service: the service never appears in the log.
 # unknown_line:    the line number is not a parsed event (it does not exist, or the parser rejected it).
-# wrong_service:   the line exists but belongs to another service than the one claimed.
+# wrong_service:   the line exists but belongs to another service than the one claimed (or, for a symptom line,
+#                  it is the candidate's own line, which belongs in evidence_lines).
 # out_of_order:    a causal-chain link happened before the link listed ahead of it.
 ProblemKind = Literal["unknown_service", "unknown_line", "wrong_service", "out_of_order"]
 
@@ -61,8 +62,17 @@ def check_incident(incident: ClassifiedIncident, events: list[LogEvent]) -> list
         problems += facts.check(location, candidate.service)
         for line_number in candidate.evidence_lines:  # the service's own lines: must exist and belong to it
             problems += [p for p in facts.check(location, candidate.service, line_number) if p.kind != "unknown_service"]
-        for line_number in candidate.symptom_lines:  # lines from other services: only need to exist
+        for line_number in candidate.symptom_lines:  # lines from OTHER services showing the effect
             problems += [p for p in facts.check(location, candidate.service, line_number) if p.kind == "unknown_line"]
+            event = facts.by_line.get(line_number)
+            if event is not None and event.service == candidate.service:
+                problems.append(
+                    Problem(
+                        kind="wrong_service",
+                        location=location,
+                        message=f"line {line_number} is {candidate.service}'s own line: move it to evidence_lines",
+                    )
+                )
     return problems
 
 

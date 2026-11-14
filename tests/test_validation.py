@@ -65,6 +65,11 @@ def test_a_symptom_line_must_still_exist() -> None:
     assert problem.kind == "unknown_line"
 
 
+def test_a_symptom_line_from_the_candidate_itself_is_misfiled() -> None:
+    [problem] = check_incident(incident(candidate("main-db", 1, symptoms=(4,))), EVENTS)  # line 4 is main-db's own
+    assert problem.kind == "wrong_service" and "move it to evidence_lines" in problem.message
+
+
 def test_a_service_that_is_not_in_the_log_is_unknown() -> None:
     kinds = [p.kind for p in check_incident(incident(candidate("payments", 1)), EVENTS)]
     assert "unknown_service" in kinds
