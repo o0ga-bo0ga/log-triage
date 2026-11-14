@@ -24,6 +24,11 @@ Severity = Literal["low", "medium", "high", "critical"]
 # insufficient_evidence: nothing credible, the report says so.
 Status = Literal["identified", "tentative", "insufficient_evidence"]
 
+# A report an on-call engineer can read in a minute. Unbounded lists also let a model write until its output cap and
+# lose the end of the JSON (seen live: a 15-link chain left no room for next_steps).
+MAX_CHAIN_LINKS = 8
+MAX_NEXT_STEPS = 6
+
 # Why a line could not become a LogEvent:
 #   empty          blank line
 #   continuation   starts with whitespace, e.g. a stack-trace frame
@@ -172,8 +177,8 @@ class FixPlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    how_it_happened: list[ChainLink]  # ordered; may be empty when the cause is unknown
-    next_steps: list[NextStep] = Field(min_length=1)
+    how_it_happened: list[ChainLink] = Field(max_length=MAX_CHAIN_LINKS)  # ordered; may be empty if the cause is unknown
+    next_steps: list[NextStep] = Field(min_length=1, max_length=MAX_NEXT_STEPS)
 
     @model_validator(mode="after")
     def _steps_point_at_the_chain(self) -> Self:

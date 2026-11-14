@@ -6,6 +6,8 @@ from pydantic import ValidationError
 
 from generator.faults import FAULTS
 from log_triage.schemas import (
+    MAX_CHAIN_LINKS,
+    MAX_NEXT_STEPS,
     Category,
     ChainLink,
     ClassifiedIncident,
@@ -174,3 +176,11 @@ def test_agent_schemas_have_no_nullable_fields(model: type) -> None:
     # crewai strips null from the strict schema it sends the provider, so a nullable field could never be null
     # (found when Groq rejected a FixPlan with `addresses: int | None`). Use an empty list instead.
     assert '"null"' not in json.dumps(model.model_json_schema())
+
+
+def test_a_plan_is_capped_so_a_reader_and_the_output_budget_both_cope() -> None:
+    plan(MAX_CHAIN_LINKS, step())
+    with pytest.raises(ValidationError):
+        plan(MAX_CHAIN_LINKS + 1, step())
+    with pytest.raises(ValidationError):
+        FixPlan(how_it_happened=[], next_steps=[step()] * (MAX_NEXT_STEPS + 1))

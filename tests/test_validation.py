@@ -1,6 +1,6 @@
 from log_triage.parser import parse_log
 from log_triage.schemas import ChainLink, ClassifiedIncident, FixPlan, LogEvent, NextStep, RootCauseCandidate
-from log_triage.validation import check_incident, check_plan
+from log_triage.validation import check_chain_order, check_incident, check_plan
 
 # Line 3 is blank, so the parser rejects it: the numbering has a gap a model could trip over.
 LOG = """\
@@ -106,3 +106,21 @@ def test_plan_problems_are_located_by_link_number_from_one() -> None:
 
 def test_an_empty_chain_has_no_problems() -> None:
     assert check_plan(plan(), EVENTS) == []
+
+
+def test_a_chain_out_of_time_order_is_a_warning_not_a_citation_problem() -> None:
+    plan_ = plan((4, "main-db"), (2, "api"))
+    assert check_plan(plan_, EVENTS) == []  # both citations are real, so nothing to reject
+    [warning] = check_chain_order(plan_, EVENTS)
+    assert warning.kind == "out_of_order"
+    assert warning.location == "how_it_happened[2]"
+    assert "line 2 (14:00:01)" in warning.message and "line 4 (14:00:02)" in warning.message
+
+
+def test_an_unknown_link_is_skipped_when_comparing_times() -> None:
+    [warning] = check_chain_order(plan((2, "api"), (999, "api"), (1, "main-db")), EVENTS)
+    assert warning.location == "how_it_happened[3]"
+
+
+def test_the_same_line_twice_is_not_out_of_order() -> None:
+    assert check_chain_order(plan((1, "main-db"), (1, "main-db")), EVENTS) == []

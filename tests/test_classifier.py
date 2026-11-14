@@ -3,7 +3,7 @@
 import pytest
 from crewai import TaskOutput
 
-from log_triage.classifier import MAX_RETRIES, build_crew, incident_guardrail
+from log_triage.classifier import build_crew, incident_guardrail
 from log_triage.parser import parse_log
 from log_triage.schemas import ClassifiedIncident
 
@@ -57,5 +57,6 @@ def test_the_task_is_wired_with_the_guardrail_and_retries(monkeypatch: pytest.Mo
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
     [task] = build_crew(EVENTS).tasks
     assert task.output_pydantic is ClassifiedIncident
-    assert task.guardrail is not None and task.guardrail_max_retries == MAX_RETRIES
+    assert task.guardrail is not None and task.guardrail_max_retries == 0  # retries live in attempts.py
+    assert "{feedback}" in task.description
     assert "{digest}" in task.description  # filled in at kickoff

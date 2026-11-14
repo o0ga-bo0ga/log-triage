@@ -1,6 +1,6 @@
 import pytest
 
-from log_triage.llm import DEFAULT_MODEL, build_llm, model_id
+from log_triage.llm import DEFAULT_MODEL, MAX_COMPLETION_TOKENS, build_llm, model_id
 
 
 @pytest.fixture(autouse=True)
@@ -34,3 +34,9 @@ def test_a_missing_key_fails_early_with_a_clear_message(monkeypatch: pytest.Monk
 
 def test_every_call_builds_a_new_llm_object() -> None:
     assert build_llm() is not build_llm()  # shared objects would double-count tokens
+
+
+def test_the_output_cap_and_reasoning_effort_reach_the_llm() -> None:
+    llm = build_llm(reasoning_effort="low")
+    assert llm.max_completion_tokens == MAX_COMPLETION_TOKENS and llm.reasoning_effort == "low"
+    assert build_llm().reasoning_effort is None  # provider default

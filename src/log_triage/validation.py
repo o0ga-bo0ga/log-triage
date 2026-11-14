@@ -14,7 +14,8 @@ from log_triage.schemas import ClassifiedIncident, FixPlan, LogEvent
 # unknown_service: the service never appears in the log.
 # unknown_line:    the line number is not a parsed event (it does not exist, or the parser rejected it).
 # wrong_service:   the line exists but belongs to another service than the one claimed.
-ProblemKind = Literal["unknown_service", "unknown_line", "wrong_service"]
+# out_of_order:    a causal-chain link happened before the link listed ahead of it.
+ProblemKind = Literal["unknown_service", "unknown_line", "wrong_service", "out_of_order"]
 
 
 class Problem(BaseModel):
@@ -73,3 +74,27 @@ def check_plan(plan: FixPlan, events: list[LogEvent]) -> list[Problem]:
     for position, link in enumerate(plan.how_it_happened, start=1):
         problems += facts.check(f"how_it_happened[{position}]", link.service, link.line_number)
     return problems
+
+
+def check_chain_order(plan: FixPlan, events: list[LogEvent]) -> list[Problem]:
+    """Links logged earlier than the link listed ahead of them. A WARNING for the report, never a reason to reject:
+    logs record when something was noticed, not when it began, so a sound causal chain can run against log time
+    (seen live: a memory leak's first heap warning was logged 8s after the gateway errors it caused)."""
+    by_line = {e.line_number: e for e in events}
+    warnings: list[Problem] = []
+    previous: LogEvent | None = None
+    for position, link in enumerate(plan.how_it_happened, start=1):
+        event = by_line.get(link.line_number)
+        if event is None:
+            continue  # check_plan reports it; it has no timestamp to compare
+        if previous is not None and event.timestamp < previous.timestamp:
+            warnings.append(
+                Problem(
+                    kind="out_of_order",
+                    location=f"how_it_happened[{position}]",
+                    message=f"line {event.line_number} ({event.timestamp:%H:%M:%S}) was logged before the link listed "
+                    f"ahead of it, line {previous.line_number} ({previous.timestamp:%H:%M:%S})",
+                )
+            )
+        previous = event
+    return warnings

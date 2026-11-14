@@ -3,9 +3,9 @@
 import pytest
 from crewai import TaskOutput
 
-from log_triage.fix_suggestor import MAX_RETRIES, build_crew, plan_guardrail
+from log_triage.fix_suggestor import DESCRIPTION, REASONING_EFFORT, build_crew, plan_guardrail
 from log_triage.parser import parse_log
-from log_triage.schemas import ClassifiedIncident, FixPlan
+from log_triage.schemas import MAX_CHAIN_LINKS, MAX_NEXT_STEPS, ClassifiedIncident, FixPlan
 
 EVENTS = parse_log(
     "2026-01-15T14:00:00.000Z main-db WARN slow query\n2026-01-15T14:00:01.000Z api ERROR upstream timeout\n"
@@ -66,5 +66,16 @@ def test_the_task_is_wired_with_the_guardrail_and_retries(monkeypatch: pytest.Mo
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
     [task] = build_crew(incident(), EVENTS).tasks
     assert task.output_pydantic is FixPlan
-    assert task.guardrail is not None and task.guardrail_max_retries == MAX_RETRIES
+    assert task.guardrail is not None and task.guardrail_max_retries == 0  # retries live in attempts.py
+    assert "{feedback}" in task.description
     assert "{incident}" in task.description and "{evidence}" in task.description
+
+
+def test_the_prompt_states_the_same_limits_as_the_schema() -> None:
+    assert f"at most {MAX_CHAIN_LINKS}" in DESCRIPTION and f"at most {MAX_NEXT_STEPS}" in DESCRIPTION
+
+
+def test_the_suggestor_runs_with_its_own_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    [agent] = build_crew(incident(), EVENTS).agents
+    assert agent.llm.reasoning_effort == REASONING_EFFORT

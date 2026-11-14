@@ -13,6 +13,7 @@ from crewai import Agent, Crew, Task, TaskOutput
 from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 
+from log_triage.attempts import kickoff_with_retries
 from log_triage.classifier import classify
 from log_triage.digest import build_digest
 from log_triage.evidence import build_evidence
@@ -22,15 +23,20 @@ from log_triage.schemas import ClassifiedIncident, FixPlan, LogEvent, ParseResul
 from log_triage.validation import check_plan
 
 MAX_RETRIES = 2  # same budget as the classifier: 3 attempts in all
+# Explaining and planning from evidence it is handed needs less thinking than finding the root cause. Low effort cut
+# one fix plan from 5,350 to 1,008 output tokens. Its effect on quality is for the evals to measure.
+REASONING_EFFORT = "low"
 
 DESCRIPTION = """\
 An incident has been classified. Explain how it unfolded and what the on-call engineer should do next.
 
 How to answer:
-- how_it_happened: the causal chain in time order, from where the fault started to what users saw. Each link cites
-  one real line number from the evidence and the service that logged it. If the status is "tentative" the chain is
-  a hypothesis; if it is "insufficient_evidence" it may be empty.
-- next_steps: in the order the engineer should do them.
+- how_it_happened: the causal chain, cause before effect, from where the fault started to what users saw: only the
+  key links, at most 8. Each link cites one real line number from the evidence and the service that logged it, and
+  its description explains in your own words what happened at that step and how it led to the next (do not just copy
+  the log line). Prefer the earliest line that shows each step. If the status is "tentative" the chain is a
+  hypothesis; if it is "insufficient_evidence" it may be empty.
+- next_steps: at most 6, in the order the engineer should do them.
   - kind: "remediate" (a fix) ONLY if the status is "identified". Otherwise every step is "investigate".
   - addresses: the 1-based positions of the chain links this step deals with, e.g. [2] or [2, 3], or [] if none.
     Every remediate step must address at least one link: a fix has to say which part of the chain it stops.
@@ -43,6 +49,8 @@ INCIDENT:
 
 EVIDENCE:
 {evidence}
+
+{feedback}
 """
 
 
@@ -53,6 +61,7 @@ class SuggestResult(BaseModel):
     error: str | None
     model_id: str
     total_tokens: int | None  # None when the run failed, because crewai raises before reporting usage
+    attempts: int  # more than 1 means the answer was rejected and retried
 
 
 def _parse(raw: str) -> FixPlan:
@@ -86,7 +95,7 @@ def build_crew(incident: ClassifiedIncident, events: list[LogEvent]) -> Crew:
         role="On-call remediation advisor",
         goal="Explain how an incident unfolded and give ordered next steps, each tied to the evidence",
         backstory="You turn a diagnosis into a short, safe plan and never recommend a fix for a cause that is only a guess.",
-        llm=build_llm(),
+        llm=build_llm(reasoning_effort=REASONING_EFFORT),
         max_rpm=1,
     )
     task = Task(
@@ -95,24 +104,23 @@ def build_crew(incident: ClassifiedIncident, events: list[LogEvent]) -> Crew:
         agent=agent,
         output_pydantic=FixPlan,
         guardrail=plan_guardrail(incident, events),
-        guardrail_max_retries=MAX_RETRIES,
+        guardrail_max_retries=0,  # retries happen in kickoff_with_retries, which also covers provider rejections
     )
     return Crew(agents=[agent], tasks=[task])
 
 
 def suggest(incident: ClassifiedIncident, result: ParseResult) -> SuggestResult:
     evidence = build_evidence(incident, build_digest(result), result.events)
-    try:
-        output = build_crew(incident, result.events).kickoff(
-            inputs={"incident": incident.model_dump_json(indent=2), "evidence": evidence}
-        )
-    except Exception as e:  # crewai raises when the guardrail still fails after every retry
-        return SuggestResult(plan=None, error=str(e), model_id=model_id(), total_tokens=None)
-    plan = output.pydantic
+    inputs = {"incident": incident.model_dump_json(indent=2), "evidence": evidence}
+    run = kickoff_with_retries(lambda: build_crew(incident, result.events), inputs, MAX_RETRIES + 1)
+    failed = SuggestResult(plan=None, error=run.error, model_id=model_id(), total_tokens=None, attempts=run.attempts)
+    if run.output is None:
+        return failed
+    plan = run.output.pydantic
     if not isinstance(plan, FixPlan):
-        return SuggestResult(plan=None, error="no structured output", model_id=model_id(), total_tokens=None)
-    return SuggestResult(plan=plan, error=None, model_id=model_id(), total_tokens=output.token_usage.total_tokens)
-
+        return failed.model_copy(update={"error": "no structured output"})
+    tokens = run.output.token_usage.total_tokens
+    return SuggestResult(plan=plan, error=None, model_id=model_id(), total_tokens=tokens, attempts=run.attempts)
 
 if __name__ == "__main__":
     # Try both agents on one log: python -m log_triage.fix_suggestor data/sample_logs/<scenario>.log
